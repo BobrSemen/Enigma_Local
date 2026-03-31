@@ -1,151 +1,233 @@
 import socket  # модуль для работы с TCP-сокетами
-import threading  # для запуска приёма сообщений в отдельном потоке
-import tkinter as tk  # GUI: окна, виджеты
-from tkinter import simpledialog  # диалог ввода небольших строк (ник, ip)
-from PIL import Image, ImageTk  # Нужна установка: pip install Pillow
-import ctypes
+import threading  # для запуска приёма сообщений и сканера в отдельных потоках
+import tkinter as tk  # GUI: окна и виджеты
+from tkinter import simpledialog  # простые модальные диалоги ввода строк
+import ctypes  # для настройки DPI на Windows
+import ipaddress  # для вычисления диапазона IP в локальной подсети
 
-
+# Попытка включить поддержку DPI на Windows (не критично, обернуто в try/except)
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
 except Exception:
+    # Если не удалось — продолжаем без ошибки
     pass
 
-# Секретный ключ для XOR-шифрования (симметричный, простой пример)
+# Секретный ключ для простого XOR-шифрования (симметричный, демонстрационный)
 KEY = "STC_SECRET_KEY"
-# Порт сервера (должен совпадать с портом сервера)
+# Порт сервера (должен совпадать с серверным)
 PORT = 5000
 
 def xor_cipher(data, key):
     """Шифрование/дешифрование простым XOR по ключу.
-    Принимает строку data и ключ key, возвращает результат как строку.
-    Такая схема не защищает данные в реальных приложениях, используется здесь для примера.
+    Принимает строку data и ключ key, возвращает строку того же размера.
+    ВНИМАНИЕ: это НЕ безопасное шифрование, используется только в учебных примерах.
     """
     return "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(data))
 
 class ChatClient:
+    """GUI-клиент для подключение к простому TCP-чату.
+    Отображает окно, сканирует локальную сеть для поиска сервера и общается по TCP.
+    """
     def __init__(self, root):
-        # root — корневое окно tkinter
+        # Сохранение корневого окна tkinter
         self.root = root
-        self.root.title("Messenger")  # заголовок окна
-        self.root.geometry("450x600")  # размер окна
+        self.root.title("Messenger")
+        # Фиксированный размер окна и запрет изменения размера
+        self.root.geometry("450x600")
         self.root.resizable(False, False)
 
-        # --- Интерфейс ---
-        # Поле чата только для чтения, автопрокрутка вниз при новых сообщениях
+        # --- Интерфейс: поле чата ---
+        # Текстовое поле только для чтения (state='disabled') — будем включать/выключать при вставке
         self.chat_field = tk.Text(
-            self.root, 
-            state='disabled', 
-            wrap='word', 
-            font=("Segoe UI", 11), 
-            bg="#ffffff", 
+            self.root,
+            state='disabled',
+            wrap='word',
+            font=("Segoe UI", 11),
+            bg="#ffffff",
             fg="#333333",
-            padx=10, 
+            padx=10,
             pady=10,
             borderwidth=0,
             highlightthickness=1,
             highlightbackground="#cccccc"
         )
+        # Размещение поля через абсолютные относительные координаты (place)
         self.chat_field.place(relx=0.05, rely=0.05, relwidth=0.9, relheight=0.75)
-        
-        # Стили для разных типов сообщений (ваши, другие, системные)
+
+        # Теги для форматирования сообщений в поле чата
+        # "my_msg" — сообщения пользователя, "other_msg" — от других, "system" — служебные
         self.chat_field.tag_configure("my_msg", background="#dcf8c6", lmargin1=20, lmargin2=20)
         self.chat_field.tag_configure("other_msg", background="#ebebeb", lmargin1=10, lmargin2=10)
         self.chat_field.tag_configure("system", foreground="#7f8c8d", justify='center', font=("Segoe UI", 9, "italic"))
 
-        # Поле ввода сообщения и привязка Enter к отправке
+        # Поле ввода текста и привязка Enter к отправке
         self.entry_field = tk.Entry(self.root, font=("Segoe UI", 12), borderwidth=5, relief=tk.FLAT)
         self.entry_field.bind("<Return>", lambda e: self.send_message())
         self.entry_field.place(relx=0.05, rely=0.85, relwidth=0.65, relheight=0.08)
-        
-        # Кнопка отправить (альтернатива нажатию Enter)
+
+        # Кнопка отправки сообщения
         self.send_btn = tk.Button(
-            self.root, 
-            text="➤", 
+            self.root,
+            text="➤",
             command=self.send_message,
-            bg="#27ae60", 
-            fg="white", 
+            bg="#27ae60",
+            fg="white",
             font=("Segoe UI", 12, "bold"),
             relief=tk.FLAT,
             cursor="hand2"
         )
         self.send_btn.place(relx=0.72, rely=0.85, relwidth=0.23, relheight=0.08)
 
-        # Запрашиваем у пользователя ник и адрес сервера
+        # 1) Запрашиваем ник у пользователя (модальный диалог)
         self.name = simpledialog.askstring("Имя", "Ваш никнейм:") or "Аноним"
-        server_ip = simpledialog.askstring("IP", "IP сервера:", initialvalue="127.0.0.1")
-        
-        # Если IP введён — пытаемся подключиться, иначе закрываем приложение
+
+        # 2) Автоматический поиск IP в локальной сети и выбор сервера
+        server_ip = self.discover_ip()
+
+        # Если IP найден/введён — подключаемся, иначе — закрываем GUI
         if server_ip:
             self.connect_to_server(server_ip)
         else:
             self.root.destroy()
 
+    def discover_ip(self):
+        """Сканирует локальную /24 подсеть и предлагает IP для подключения.
+        Возвращает строку с IP или None.
+        """
+        # Всплывающее окно "Поиск" — информирует пользователя о процессе
+        wait_win = tk.Toplevel(self.root)
+        wait_win.title("Поиск")
+        wait_win.geometry("250x100")
+        tk.Label(wait_win, text="\nПоиск серверов в сети...\nПожалуйста, подождите.").pack()
+        # Делает окно модальным (блокирует взаимодействие с основным окном)
+        wait_win.grab_set()
+
+        found_ips = []  # список найденных адресов с доступным PORT
+        scan_done = threading.Event()  # событие, сигнализирующее об окончании сканирования
+
+        def scan(ip):
+            """Проверка конкретного IP: открыт ли TCP-порт PORT."""
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.2)  # короткий таймаут для ускорения сканирования
+                # connect_ex возвращает 0 при успешном соединении
+                if s.connect_ex((str(ip), PORT)) == 0:
+                    found_ips.append(str(ip))
+
+        def run_scanner():
+            """Фоновой запуск сканирования диапазона адресов подсети."""
+            try:
+                # Попытка получить локальный IP по имени хоста
+                my_ip = socket.gethostbyname(socket.gethostname())
+                # Формируем подсеть /24 на основе локального IP
+                subnet = ".".join(my_ip.split(".")[:-1]) + ".0/24"
+                # Создаём потоки для проверки каждого адреса в подсети
+                threads = [threading.Thread(target=scan, args=(ip,)) for ip in ipaddress.IPv4Network(subnet)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+            except Exception:
+                # Если что-то пошло не так — просто завершаем сканирование
+                pass
+            finally:
+                # Сигнал завершения сканирования (независимо от результата)
+                scan_done.set()
+
+        # Запуск сканера в отдельном потоке, чтобы не блокировать GUI
+        threading.Thread(target=run_scanner, daemon=True).start()
+
+        # Периодически проверяем состояние и закрываем окно по завершении
+        def check_status():
+            if scan_done.is_set():
+                wait_win.destroy()
+            else:
+                wait_win.after(100, check_status)
+
+        wait_win.after(100, check_status)
+        # Ждём закрытия окна wait_win (модальность)
+        self.root.wait_window(wait_win)
+
+        # После сканирования: если ничего не найдено — предлагаем ввести IP вручную
+        if not found_ips:
+            return simpledialog.askstring("IP", "Серверы не найдены.\nВведите IP вручную:", initialvalue="127.0.0.1")
+        else:
+            # Формируем сообщение со списком найденных адресов и предлагаем выбрать/ввести IP
+            msg = "Найдены активные серверы:\n" + "\n".join(found_ips) + "\n\nВведите IP для подключения:"
+            # По умолчанию подставляем первый найденный адрес
+            return simpledialog.askstring("Выбор сервера", msg, initialvalue=found_ips[0])
+
     def log(self, sender, msg, tag):
         """Добавляет строку в окно чата.
-        sender: имя отправителя (пустая строка — вывод только msg),
-        msg: текст сообщения,
-        tag: тег оформления (my_msg/other_msg/system).
+        sender: имя отправителя (строка) — если пусто, выводится как системное сообщение.
+        msg: текст сообщения.
+        tag: тег форматирования ('my_msg', 'other_msg', 'system').
         """
-        self.chat_field.config(state='normal')  # разрешаем запись во view
-        
+        # Разрешаем редактирование временно, чтобы вставить текст
+        self.chat_field.config(state='normal')
         if tag == "system" or not sender:
-            # Системные сообщения (centr) или сообщения, где sender не нужен
+            # Системные сообщения выводим отдельно
             self.chat_field.insert(tk.END, f"\n{msg}\n", tag)
         else:
-            # Обычное сообщение с префиксом "Имя: текст"
+            # Нормальные сообщения с префиксом "Имя: текст"
             self.chat_field.insert(tk.END, f"\n{sender}: {msg}\n", tag)
-            
-        self.chat_field.config(state='disabled')  # снова запрет на редактирование пользователем
-        self.chat_field.see(tk.END)  # прокрутка к последнему сообщению
+        # Возвращаем поле в режим только для чтения и прокручиваем вниз
+        self.chat_field.config(state='disabled')
+        self.chat_field.see(tk.END)
 
     def connect_to_server(self, ip):
-        """Устанавливает TCP-соединение с сервером по IP:PORT и запускает поток приёма."""
+        """Устанавливает TCP-соединение с выбранным IP и запускает приёмный поток."""
         try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # создаём TCP-сокет
-            self.sock.connect((ip, PORT))  # подключаемся к серверу
-            # Показываем приветственное системное сообщение в чате
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # Попытка подключения к серверу по указанному IP и порту
+            self.sock.connect((ip, PORT))
+            # Информируем пользователя о подключении
             self.log("", f"[*] Добро пожаловать, {self.name}!", "system")
-            # Запускаем поток, который постоянно читает входящие данные
+            # Запускаем фоновый поток, который будет принимать сообщения от сервера
             threading.Thread(target=self.receive_loop, daemon=True).start()
         except Exception as e:
-            # Если не удалось подключиться — уведомляем пользователя
+            # При ошибке подключения выводим сообщение в интерфейс
             self.log("", f"[!] Ошибка подключения: {e}", "system")
 
     def receive_loop(self):
-        """Цикл приёма: получает данные, декодирует и отображает их."""
+        """Цикл приёма данных от сервера.
+        Полученные байты декодируются в utf-8, затем дешифруются XOR и выводятся.
+        """
         while True:
             try:
-                # Получаем до 1024 байт и декодируем в строку utf-8
+                # Получаем до 1024 байт от сервера (блокирующий вызов)
                 data = self.sock.recv(1024).decode('utf-8')
-                if not data: break  # если пусто — соединение закрыто
-                # Дешифруем полученные данные XOR-ключом
+                # Если пришла пустая строка — сервер закрыл соединение
+                if not data:
+                    break
+                # Дешифруем простым XOR и выводим в чат
                 decrypted = xor_cipher(data, KEY)
-                # decrypted уже содержит формат "Имя: текст", поэтому sender пустой
                 self.log("", decrypted, "other_msg")
-            except:
-                break  # при ошибке (сеть/сокет) — выходим из цикла
-        # После выхода — уведомляем пользователя о разрыве связи
+            except Exception:
+                # При ошибке (сеть/сокет) прерываем цикл приёма
+                break
+        # Сообщаем пользователю о разрыве связи
         self.log("", "[!] Связь разорвана.", "system")
 
     def send_message(self):
         """Берёт текст из поля ввода, отображает локально и отправляет на сервер."""
         msg = self.entry_field.get()
         if msg:
-            # Локально отображаем как ваше сообщение
+            # Отображаем собственное сообщение в интерфейсе
             self.log("Вы", msg, "my_msg")
-            
-            # Формируем полное сообщение "Ник: текст", шифруем и отправляем
+            # Формируем строку вида "Ник: сообщение" и шифруем её
             full_msg = f"{self.name}: {msg}"
             encrypted = xor_cipher(full_msg, KEY)
-            # Отправляем байты, кодируя в utf-8
-            self.sock.send(encrypted.encode('utf-8'))
-            
-            # Очищаем поле ввода после отправки
+            try:
+                # Отправляем зашифрованную строку в кодировке utf-8
+                self.sock.send(encrypted.encode('utf-8'))
+            except Exception:
+                # При ошибке отправки информируем пользователя
+                self.log("", "[!] Ошибка отправки", "system")
+            # Очищаем поле ввода
             self.entry_field.delete(0, tk.END)
 
+# Точка входа: создание окна tkinter и запуск клиента
 if __name__ == "__main__":
-    # Точка входа: создаём GUI и запускаем главный цикл tkinter
     root = tk.Tk()
     ChatClient(root)
     root.mainloop()
