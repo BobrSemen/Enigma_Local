@@ -67,4 +67,3 @@ def start_server(count_users, port):
 if __name__ == "__main__":
     # Точка входа: запускаем сервер с максимально 5 ожидающими подключениями и портом PORT
     start_server(5, PORT)
-# ...existing

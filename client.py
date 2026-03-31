@@ -2,6 +2,14 @@ import socket  # модуль для работы с TCP-сокетами
 import threading  # для запуска приёма сообщений в отдельном потоке
 import tkinter as tk  # GUI: окна, виджеты
 from tkinter import simpledialog  # диалог ввода небольших строк (ник, ip)
+from PIL import Image, ImageTk  # Нужна установка: pip install Pillow
+import ctypes
+
+
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except Exception:
+    pass
 
 # Секретный ключ для XOR-шифрования (симметричный, простой пример)
 KEY = "STC_SECRET_KEY"
@@ -20,26 +28,48 @@ class ChatClient:
         # root — корневое окно tkinter
         self.root = root
         self.root.title("Messenger")  # заголовок окна
-        self.root.geometry("400x500")  # размер окна
-        self.sock = None  # сокет будет присвоен после подключения
+        self.root.geometry("450x600")  # размер окна
+        self.root.resizable(False, False)
 
         # --- Интерфейс ---
         # Поле чата только для чтения, автопрокрутка вниз при новых сообщениях
-        self.chat_field = tk.Text(self.root, state='disabled', wrap='word', font=("Arial", 10))
-        self.chat_field.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        self.chat_field = tk.Text(
+            self.root, 
+            state='disabled', 
+            wrap='word', 
+            font=("Segoe UI", 11), 
+            bg="#ffffff", 
+            fg="#333333",
+            padx=10, 
+            pady=10,
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground="#cccccc"
+        )
+        self.chat_field.place(relx=0.05, rely=0.05, relwidth=0.9, relheight=0.75)
         
         # Стили для разных типов сообщений (ваши, другие, системные)
-        self.chat_field.tag_configure("my_msg", background="#e1f5fe", lmargin1=20, lmargin2=20, rmargin=10)
-        self.chat_field.tag_configure("other_msg", background="#f5f5f5", lmargin1=10, lmargin2=10, rmargin=20)
-        self.chat_field.tag_configure("system", foreground="gray", justify='center', font=("Arial", 8, "italic"))
+        self.chat_field.tag_configure("my_msg", background="#dcf8c6", lmargin1=20, lmargin2=20)
+        self.chat_field.tag_configure("other_msg", background="#ebebeb", lmargin1=10, lmargin2=10)
+        self.chat_field.tag_configure("system", foreground="#7f8c8d", justify='center', font=("Segoe UI", 9, "italic"))
 
         # Поле ввода сообщения и привязка Enter к отправке
-        self.entry_field = tk.Entry(self.root)
+        self.entry_field = tk.Entry(self.root, font=("Segoe UI", 12), borderwidth=5, relief=tk.FLAT)
         self.entry_field.bind("<Return>", lambda e: self.send_message())
-        self.entry_field.pack(padx=10, pady=5, side=tk.LEFT, fill=tk.X, expand=True)
+        self.entry_field.place(relx=0.05, rely=0.85, relwidth=0.65, relheight=0.08)
         
         # Кнопка отправить (альтернатива нажатию Enter)
-        tk.Button(self.root, text="Отправить", command=self.send_message).pack(padx=10, pady=5, side=tk.RIGHT)
+        self.send_btn = tk.Button(
+            self.root, 
+            text="➤", 
+            command=self.send_message,
+            bg="#27ae60", 
+            fg="white", 
+            font=("Segoe UI", 12, "bold"),
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        self.send_btn.place(relx=0.72, rely=0.85, relwidth=0.23, relheight=0.08)
 
         # Запрашиваем у пользователя ник и адрес сервера
         self.name = simpledialog.askstring("Имя", "Ваш никнейм:") or "Аноним"
@@ -61,10 +91,10 @@ class ChatClient:
         
         if tag == "system" or not sender:
             # Системные сообщения (centr) или сообщения, где sender не нужен
-            self.chat_field.insert(tk.END, f"{msg}\n", tag)
+            self.chat_field.insert(tk.END, f"\n{msg}\n", tag)
         else:
             # Обычное сообщение с префиксом "Имя: текст"
-            self.chat_field.insert(tk.END, f"{sender}: {msg}\n", tag)
+            self.chat_field.insert(tk.END, f"\n{sender}: {msg}\n", tag)
             
         self.chat_field.config(state='disabled')  # снова запрет на редактирование пользователем
         self.chat_field.see(tk.END)  # прокрутка к последнему сообщению
@@ -101,7 +131,7 @@ class ChatClient:
     def send_message(self):
         """Берёт текст из поля ввода, отображает локально и отправляет на сервер."""
         msg = self.entry_field.get()
-        if msg and self.sock:
+        if msg:
             # Локально отображаем как ваше сообщение
             self.log("Вы", msg, "my_msg")
             
@@ -119,4 +149,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     ChatClient(root)
     root.mainloop()
-# ...existing
