@@ -419,4 +419,4 @@ FodyWeavers.xsd
 .venv/
 __pycache__/
 *.py[cod]
-.env
+.venv/

@@ -4,6 +4,8 @@ import tkinter as tk  # GUI: окна и виджеты
 from tkinter import simpledialog  # простые модальные диалоги ввода строк
 import ctypes  # для настройки DPI на Windows
 import ipaddress  # для вычисления диапазона IP в локальной подсети
+import serial  # модуль для связи с платой TrackDuino (pip install pyserial)
+import time
 
 # Попытка включить поддержку DPI на Windows (не критично, обернуто в try/except)
 try:
@@ -11,6 +13,19 @@ try:
 except Exception:
     # Если не удалось — продолжаем без ошибки
     pass
+
+# --- НАСТРОЙКИ ПЛАТЫ ---
+SERIAL_PORT = 'COM3'  # Укажите порт вашей платы (из Arduino IDE)
+BAUD_RATE = 9600      # Скорость должна совпадать со скоростью в Serial.begin()
+
+try:
+    # Инициализация подключения к TrackDuino
+    arduino = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
+    print(f"[!] TrackDuino подключена на порта {SERIAL_PORT}")
+except Exception as e:
+    # Если плата не подключена, клиент продолжит работу как обычный чат
+    print(f"[!] Плата не обнаружена: {e}")
+    arduino = None
 
 # Секретный ключ для простого XOR-шифрования (симметричный, демонстрационный)
 KEY = "STC_SECRET_KEY"
@@ -31,7 +46,7 @@ class ChatClient:
     def __init__(self, root):
         # Сохранение корневого окна tkinter
         self.root = root
-        self.root.title("Messenger")
+        self.root.title("Messenger + TrackDuino")
         # Фиксированный размер окна и запрет изменения размера
         self.root.geometry("450x600")
         self.root.resizable(False, False)
@@ -180,8 +195,17 @@ class ChatClient:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             # Попытка подключения к серверу по указанному IP и порту
             self.sock.connect((ip, PORT))
-            # Информируем пользователя о подключении
-            self.log("", f"[*] Добро пожаловать, {self.name}!", "system")
+            
+
+            if arduino:
+                status_msg = f"[*] Добро пожаловать, {self.name}! Управление платой готово."
+            else:
+                status_msg = f"[*] Добро пожаловать, {self.name}! (Плата не подключена)"
+            
+            # Информируем пользователя о статусе
+            self.log("", status_msg, "system")
+            # -------------------------------------
+
             # Запускаем фоновый поток, который будет принимать сообщения от сервера
             threading.Thread(target=self.receive_loop, daemon=True).start()
         except Exception as e:
@@ -191,6 +215,7 @@ class ChatClient:
     def receive_loop(self):
         """Цикл приёма данных от сервера.
         Полученные байты декодируются в utf-8, затем дешифруются XOR и выводятся.
+        В этой версии команды на плату НЕ передаются из сети (приватное управление).
         """
         while True:
             try:
@@ -202,6 +227,8 @@ class ChatClient:
                 # Дешифруем простым XOR и выводим в чат
                 decrypted = xor_cipher(data, KEY)
                 self.log("", decrypted, "other_msg")
+                
+                # Здесь мы НЕ вызываем управление платой, чтобы другие не могли ей командовать.
             except Exception:
                 # При ошибке (сеть/сокет) прерываем цикл приёма
                 break
@@ -209,11 +236,26 @@ class ChatClient:
         self.log("", "[!] Связь разорвана.", "system")
 
     def send_message(self):
-        """Берёт текст из поля ввода, отображает локально и отправляет на сервер."""
+        """Берёт текст из поля ввода, отображает локально и отправляет на сервер.
+        Также проверяет наличие команд для TrackDuino.
+        """
         msg = self.entry_field.get()
         if msg:
             # Отображаем собственное сообщение в интерфейсе
             self.log("Вы", msg, "my_msg")
+
+            # --- БЛОК УПРАВЛЕНИЯ ПЛАТОЙ ---
+            # Проверяем: если введена команда для платы и плата физически подключена
+            if arduino and "TrackDuino:" in msg:
+                try:
+                    # Извлекаем текст команды после префикса
+                    command = msg.split("TrackDuino:")[1].strip()
+                    # Отправляем команду в последовательный порт
+                    arduino.write((command + "\n").encode('utf-8'))
+                    print(f"[LOCAL] Плата получила команду: {command}")
+                except Exception as e:
+                    print(f"[!] Ошибка Serial: {e}")
+
             # Формируем строку вида "Ник: сообщение" и шифруем её
             full_msg = f"{self.name}: {msg}"
             encrypted = xor_cipher(full_msg, KEY)

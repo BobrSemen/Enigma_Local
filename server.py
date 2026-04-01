@@ -9,6 +9,7 @@ PORT = 5000
 
 # Список текущих подключённых клиентских сокетов
 clients = []
+max_clients = 10  # Максимальное количество клиентов, ожидающих подключения (backlog)
 
 def broadcast(message, current_client):
     """Отправляет зашифрованное сообщение всем, кроме отправителя."""
@@ -65,5 +66,5 @@ def start_server(count_users, port):
         threading.Thread(target=handle_client, args=(client_sock,), daemon=True).start()
 
 if __name__ == "__main__":
-    # Точка входа: запускаем сервер с максимально 5 ожидающими подключениями и портом PORT
-    start_server(5, PORT)
+    # Точка входа: запускаем сервер с max_clients ожидающими подключениями и портом PORT
+    start_server(max_clients, PORT)
