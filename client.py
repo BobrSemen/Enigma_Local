@@ -17,6 +17,14 @@ except Exception:
 SERIAL_PORT = 'COM6'  # Укажите порт вашей платы (из Arduino IDE)
 BAUD_RATE = 115200  # Скорость должна совпадать со скоростью в Serial.begin()
 
+# Список команд для вывода в интерфейс при подключении
+HELP_COMMANDS = """
+[СПРАВКА] Команды для управления:
+- TD: red  (Выключить гусеницы, и включить красный светодиод)
+- TD: green (Включить гусеницы, и включить зеленый светодиод)
+- TD: blue (Включить голубой светодиод)
+"""
+
 try:
     # Инициализация подключения к TrackDuino
     arduino = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
@@ -48,10 +56,13 @@ class ChatClient:
     def __init__(self, root):
         # Сохранение корневого окна tkinter
         self.root = root
-        self.root.title("Messenger + TrackDuino")
+        self.root.title("Messenger")
         # Фиксированный размер окна и запрет изменения размера
         self.root.geometry("450x600")
         self.root.resizable(False, False)
+
+        # Скрываем основное окно на время ввода ника и поиска IP
+        self.root.withdraw()
 
         # --- Интерфейс: поле чата ---
         # Текстовое поле только для чтения (state='disabled') — будем включать/выключать при вставке
@@ -76,6 +87,8 @@ class ChatClient:
         self.chat_field.tag_configure("my_msg", background="#dcf8c6", lmargin1=20, lmargin2=20)
         self.chat_field.tag_configure("other_msg", background="#ebebeb", lmargin1=10, lmargin2=10)
         self.chat_field.tag_configure("system", foreground="#7f8c8d", justify='center', font=("Segoe UI", 9, "italic"))
+        # Дополнительный тег для списка команд
+        self.chat_field.tag_configure("commands", foreground="#2980b9", font=("Consolas", 10, "bold"))
 
         # Поле ввода текста и привязка Enter к отправке
         self.entry_field = tk.Entry(self.root, font=("Segoe UI", 12), borderwidth=5, relief=tk.FLAT)
@@ -96,13 +109,16 @@ class ChatClient:
         self.send_btn.place(relx=0.72, rely=0.85, relwidth=0.23, relheight=0.08)
 
         # 1) Запрашиваем ник у пользователя (модальный диалог)
-        self.name = simpledialog.askstring("Имя", "Ваш никнейм:") or "Аноним"
+        self.name = simpledialog.askstring("Имя", "Ваш никнейм:", parent=self.root) or "Аноним"
 
         # 2) Автоматический поиск IP в локальной сети и выбор сервера
         server_ip = self.discover_ip()
 
         # Если IP найден/введён — подключаемся, иначе — закрываем GUI
         if server_ip:
+            # Настройка завершена: восстанавливаем окно и выводим на передний план
+            self.root.deiconify()
+            self.root.focus_force()
             self.connect_to_server(server_ip)
         else:
             self.root.destroy()
@@ -166,22 +182,22 @@ class ChatClient:
 
         # После сканирования: если ничего не найдено — предлагаем ввести IP вручную
         if not found_ips:
-            return simpledialog.askstring("IP", "Серверы не найдены.\nВведите IP вручную:", initialvalue="127.0.0.1")
+            return simpledialog.askstring("IP", "Серверы не найдены.\nВведите IP вручную:", initialvalue="127.0.0.1", parent=self.root)
         else:
             # Формируем сообщение со списком найденных адресов и предлагаем выбрать/ввести IP
             msg = "Найдены активные серверы:\n" + "\n".join(found_ips) + "\n\nВведите IP для подключения:"
             # По умолчанию подставляем первый найденный адрес
-            return simpledialog.askstring("Выбор сервера", msg, initialvalue=found_ips[0])
+            return simpledialog.askstring("Выбор сервера", msg, initialvalue=found_ips[0], parent=self.root)
 
     def log(self, sender, msg, tag):
         """Добавляет строку в окно чата.
         sender: имя отправителя (строка) — если пусто, выводится как системное сообщение.
         msg: текст сообщения.
-        tag: тег форматирования ('my_msg', 'other_msg', 'system').
+        tag: тег форматирования ('my_msg', 'other_msg', 'system', 'commands').
         """
         # Разрешаем редактирование временно, чтобы вставить текст
         self.chat_field.config(state='normal')
-        if tag == "system" or not sender:
+        if tag == "system" or tag == "commands" or not sender:
             # Системные сообщения выводим отдельно
             self.chat_field.insert(tk.END, f"\n{msg}\n", tag)
         else:
@@ -200,11 +216,14 @@ class ChatClient:
 
             if arduino:
                 status_msg = f"[*] Добро пожаловать, {self.name}! Управление платой готово."
+                self.log("", status_msg, "system")
+                # ВЫВОД ДОСТУПНЫХ КОМАНД ПРИ ПОДКЛЮЧЕНИИ
+                self.log("", HELP_COMMANDS, "commands")
             else:
                 status_msg = f"[*] Добро пожаловать, {self.name}! (Плата не подключена)"
+                self.log("", status_msg, "system")
 
             # Информируем пользователя о статусе
-            self.log("", status_msg, "system")
             # -------------------------------------
 
             # Запускаем фоновый поток, который будет принимать сообщения от сервера
