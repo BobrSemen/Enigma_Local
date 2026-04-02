@@ -5,7 +5,6 @@ from tkinter import simpledialog  # простые модальные диало
 import ctypes  # для настройки DPI на Windows
 import ipaddress  # для вычисления диапазона IP в локальной подсети
 import serial  # модуль для связи с платой TrackDuino (pip install pyserial)
-import time
 
 # Попытка включить поддержку DPI на Windows (не критично, обернуто в try/except)
 try:
@@ -15,8 +14,8 @@ except Exception:
     pass
 
 # --- НАСТРОЙКИ ПЛАТЫ ---
-SERIAL_PORT = 'COM3'  # Укажите порт вашей платы (из Arduino IDE)
-BAUD_RATE = 9600      # Скорость должна совпадать со скоростью в Serial.begin()
+SERIAL_PORT = 'COM6'  # Укажите порт вашей платы (из Arduino IDE)
+BAUD_RATE = 115200  # Скорость должна совпадать со скоростью в Serial.begin()
 
 try:
     # Инициализация подключения к TrackDuino
@@ -32,6 +31,7 @@ KEY = "STC_SECRET_KEY"
 # Порт сервера (должен совпадать с серверным)
 PORT = 5000
 
+
 def xor_cipher(data, key):
     """Шифрование/дешифрование простым XOR по ключу.
     Принимает строку data и ключ key, возвращает строку того же размера.
@@ -39,10 +39,12 @@ def xor_cipher(data, key):
     """
     return "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(data))
 
+
 class ChatClient:
     """GUI-клиент для подключение к простому TCP-чату.
     Отображает окно, сканирует локальную сеть для поиска сервера и общается по TCP.
     """
+
     def __init__(self, root):
         # Сохранение корневого окна tkinter
         self.root = root
@@ -195,13 +197,12 @@ class ChatClient:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             # Попытка подключения к серверу по указанному IP и порту
             self.sock.connect((ip, PORT))
-            
 
             if arduino:
                 status_msg = f"[*] Добро пожаловать, {self.name}! Управление платой готово."
             else:
                 status_msg = f"[*] Добро пожаловать, {self.name}! (Плата не подключена)"
-            
+
             # Информируем пользователя о статусе
             self.log("", status_msg, "system")
             # -------------------------------------
@@ -227,7 +228,7 @@ class ChatClient:
                 # Дешифруем простым XOR и выводим в чат
                 decrypted = xor_cipher(data, KEY)
                 self.log("", decrypted, "other_msg")
-                
+
                 # Здесь мы НЕ вызываем управление платой, чтобы другие не могли ей командовать.
             except Exception:
                 # При ошибке (сеть/сокет) прерываем цикл приёма
@@ -246,10 +247,10 @@ class ChatClient:
 
             # --- БЛОК УПРАВЛЕНИЯ ПЛАТОЙ ---
             # Проверяем: если введена команда для платы и плата физически подключена
-            if arduino and "TrackDuino:" in msg:
+            if arduino and "TD:" in msg:
                 try:
                     # Извлекаем текст команды после префикса
-                    command = msg.split("TrackDuino:")[1].strip()
+                    command = msg.split("TD:")[1].strip()
                     # Отправляем команду в последовательный порт
                     arduino.write((command + "\n").encode('utf-8'))
                     print(f"[LOCAL] Плата получила команду: {command}")
@@ -267,6 +268,7 @@ class ChatClient:
                 self.log("", "[!] Ошибка отправки", "system")
             # Очищаем поле ввода
             self.entry_field.delete(0, tk.END)
+
 
 # Точка входа: создание окна tkinter и запуск клиента
 if __name__ == "__main__":

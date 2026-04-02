@@ -1,54 +1,57 @@
-// Определяем пины для цветов
-const int redPin = 9;
-const int greenPin = 10;
-const int bluePin = 11;
-
-void setup() {
-  // Настраиваем пины на выход
-  pinMode(redPin, OUTPUT);
-  pinMode(greenPin, OUTPUT);
-  pinMode(bluePin, OUTPUT);
-
-  // Запускаем серийный порт на той же скорости, что в Python (9600)
-  Serial.begin(9600);
-  
-  // Тестовое мигание при включении
-  digitalWrite(redPin, HIGH); delay(200); digitalWrite(redPin, LOW);
-  digitalWrite(greenPin, HIGH); delay(200); digitalWrite(greenPin, LOW);
-  digitalWrite(bluePin, HIGH); delay(200); digitalWrite(bluePin, LOW);
-  
-  Serial.println("TrackDuino Ready!");
+// Глобальная переменная для хранения полученной команды
+String _ABVAR_1_cmd = "";
+ 
+// Функция setup() выполняется один раз при запуске или сбросе платы
+void setup()
+{
+  // Инициализация последовательной связи со скоростью 115200 бит/с
+  Serial.begin(115200);
+  // Устанавливаем начальное значение команды "None" (нет команды)
+  _ABVAR_1_cmd = "None";
+ 
 }
-
-void loop() {
-  // Проверяем, пришли ли данные от Python-клиента
-  if (Serial.available() > 0) {
-    // Читаем строку до символа переноса (\n)
-    String command = Serial.readStringUntil('\n');
-    command.trim(); // Убираем лишние пробелы или символы переноса
-
-    // Логика переключения цветов
-    if (command == "red") {
-      setColor(HIGH, LOW, LOW);
-    } 
-    else if (command == "green") {
-      setColor(LOW, HIGH, LOW);
-    } 
-    else if (command == "blue") {
-      setColor(LOW, LOW, HIGH);
-    } 
-    else if (command == "off") {
-      setColor(LOW, LOW, LOW);
+ 
+// Функция loop() выполняется циклически после setup()
+void loop()
+{
+  // Проверяем, есть ли данные в буфере последовательного порта
+  if (Serial.available() > 0)
+  {
+    // Считываем строку до символа перевода строки '\n'
+    _ABVAR_1_cmd = Serial.readStringUntil('\n');
+    // Удаляем пробелы и символы табуляции в начале и конце строки
+    _ABVAR_1_cmd.trim();
+ 
+    // Команды для управления RGB-светодиодом
+    if (_ABVAR_1_cmd == "green")
+    {
+      builtInRGB(GREEN);           // Включаем зелёный светодиод
+      startMotor(1, 100);
+      startMotor(2, 100);
+      Serial.println("OK :: green_"); // Подтверждаем выполнение команды
     }
-    else if (command == "white") {
-      setColor(HIGH, HIGH, HIGH);
+    else if (_ABVAR_1_cmd == "red")
+    {
+      builtInRGB(RED);             // Включаем красный светодиод
+      startMotor(1, 0);
+      startMotor(2, 0);
+      Serial.println("OK :: red_");
     }
+    else if (_ABVAR_1_cmd == "blue")
+    {
+      builtInRGB(BLUE);            // Включаем синий светодиод
+      Serial.println("OK :: blue_");
+    }
+ 
+    // Ждём 1 секунду для выполнения команды (светодиод горит или робот движется)
+    delay(1000);
+ 
+    // Выключаем светодиод и останавливаем робота
+    builtInRGB(OFF);
+ 
+    
+    
+    // Ждём ещё 1 секунду перед следующим циклом
+    delay(1000);
   }
-}
-
-// Функция для удобного управления всеми цветами сразу
-void setColor(int r, int g, int b) {
-  digitalWrite(redPin, r);
-  digitalWrite(greenPin, g);
-  digitalWrite(bluePin, b);
 }
